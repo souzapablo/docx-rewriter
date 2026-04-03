@@ -1,0 +1,58 @@
+HOW docxRewriter.js WORKS
+=========================
+
+KEY INSIGHT: A .docx FILE IS JUST A ZIP
+A .docx file is actually a ZIP archive containing XML files.
+The main content lives in word/document.xml.
+This file uses the JSZip library to open that ZIP and manipulate the XML directly.
+
+
+PART 1: extractParagraphs(arrayBuffer)
+---------------------------------------
+Goal: Read the document and return a list of all non-empty paragraphs with their text and style.
+
+Steps:
+1. Opens the .docx as a ZIP and reads word/document.xml as a string
+2. Parses the XML into a DOM tree (like parsing HTML in a browser)
+3. Finds all <w:p> elements (Word paragraphs)
+4. For each paragraph:
+   - Collects all <w:t> (text) elements and joins them -> the paragraph's plain text
+   - Skips it if the text is empty (blank lines, spacers)
+   - Reads <w:pStyle> to get the paragraph style (e.g. Heading1, Normal)
+   - Saves { index, text, style } — the index is critical, it's the paragraph's position in the document
+
+Why save the index?
+Because after AI rewrites the text, the app needs to know which paragraph to update.
+The index is the "address" of each paragraph.
+
+
+PART 2: rebuildDocx(arrayBuffer, rewrittenParagraphs)
+------------------------------------------------------
+Goal: Take the original .docx and inject the AI-rewritten text back in, without touching any formatting.
+
+Steps:
+1. Opens the .docx again and parses the XML (same as above)
+2. Builds a Map of { index -> newText } for fast lookup
+3. For each paragraph that needs updating:
+   - Finds the paragraph node by its index
+   - Gets all <w:r> (run) elements — a "run" is a chunk of text with consistent formatting
+   - Keeps only the first run, puts the full rewritten text into it
+   - Deletes all other runs — this is what prevents duplicate text
+   - Sets xml:space="preserve" to protect leading/trailing spaces
+4. Serializes the modified DOM back to an XML string
+5. Replaces word/document.xml in the ZIP with the new XML
+6. Returns the ZIP as a new ArrayBuffer (the new .docx file)
+
+
+WHY THE "KEEP FIRST RUN, DELETE THE REST" STRATEGY?
+-----------------------------------------------------
+A single paragraph in Word can have multiple runs. For example:
+
+  "Hello **world** today"
+
+That's 3 runs: "Hello " (normal), "world" (bold), " today" (normal).
+
+When AI rewrites it to "Hi everyone", there's no bold anymore — it's one chunk of text.
+So the code puts "Hi everyone" into the first run and deletes the others.
+The first run's character formatting (font, size, color) is preserved via its <w:rPr> element,
+but the bold mid-sentence styling is lost — an acceptable trade-off for a rewrite.
