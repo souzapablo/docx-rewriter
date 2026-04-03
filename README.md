@@ -1,71 +1,74 @@
 # Apryse DOCX Editor
 
-A browser-based DOCX editor built with [Apryse WebViewer](https://apryse.com) and React + Vite.
+A browser-based DOCX editor with AI rewriting, built with [Apryse WebViewer](https://apryse.com), React, and Vite.
 
 ## Features
 
 - Open any `.docx` file from disk
 - Full rich-text editing via Apryse's Office Editor (bold, italic, headings, lists, tables, …)
+- AI-powered rewriting — select text, describe the change, Claude rewrites it in-place while preserving all formatting
 - Save / download the edited file as a `.docx`
-- Create new blank documents
 
 ## Setup
 
-### 1. Get a free trial key
+### 1. Copy the env file and fill in your keys
 
-Sign up at <https://dev.apryse.com> and copy your license key.
-
-### 2. Paste the key
-
-Open `src/components/WebViewerEditor.jsx` and replace the placeholder:
-
-```js
-const APRYSE_LICENSE_KEY = 'YOUR_APRYSE_LICENSE_KEY_HERE'
+```bash
+cp .env.example .env
 ```
 
-### 3. Install dependencies & copy WebViewer assets
+| Variable | Where to get it |
+|---|---|
+| `VITE_ANTHROPIC_API_KEY` | [console.anthropic.com](https://console.anthropic.com) |
+| `VITE_APRYSE_LICENSE_KEY` | [dev.apryse.com](https://dev.apryse.com) |
+
+### 2. Install and run
 
 ```bash
 npm install
-node scripts/copy-webviewer.js
-```
-
-> The second command copies ~50 MB of WebViewer static files from
-> `node_modules/@pdftron/webviewer/public` → `public/webviewer/lib`.
-> It only needs to run once (or after upgrading the package).
-
-### 4. Start the dev server
-
-```bash
 npm run dev
 ```
 
-Open <http://localhost:3000>.
+`npm run dev` automatically copies the WebViewer static assets from
+`node_modules/@pdftron/webviewer/public` → `public/lib/webviewer/` before
+starting the dev server.
+
+Open <http://localhost:5173>.
 
 ## Project structure
 
 ```
 src/
-  App.jsx                   – root layout, file-open / save logic
+  App.jsx                      – root layout, file-open / save / AI rewrite logic
   components/
-    Toolbar.jsx             – New / Open / Save buttons
-    WebViewerEditor.jsx     – Apryse WebViewer wrapper
+    Toolbar.jsx                – New / Open / Save / AI rewrite buttons
+    WebViewerEditor.jsx        – Apryse WebViewer wrapper
+  utils/
+    aiRewrite.js               – calls Claude API with the selected text and prompt
+    docxRewriter.js            – reads and writes .docx XML (extract paragraphs / rebuild file)
 public/
-  webviewer/lib/            – (generated) Apryse static assets
+  lib/webviewer/               – (generated) Apryse static assets, not committed to git
 scripts/
-  copy-webviewer.js         – one-time asset copy helper
+  copy-webviewer-files.cjs     – copies WebViewer assets from node_modules (run automatically)
 ```
 
 ## How it works
 
+### Viewing and editing
 | Step | Code |
-|------|------|
+|---|---|
 | Init viewer | `WebViewer({ enableOfficeEditing: true }, domRef)` |
-| Load file   | `instance.UI.loadDocument(objectUrl, { extension: 'docx' })` |
-| Save file   | `doc.getFileData({ downloadType: 'office' })` → Blob → `<a>` download |
+| Load file | `instance.UI.loadDocument(objectUrl, { extension: 'docx' })` |
+| Save file | `doc.getFileData({ downloadType: 'office' })` → Blob → `<a>` download |
+
+### AI rewriting
+1. `docxRewriter.js` unzips the `.docx`, parses `word/document.xml`, and extracts all paragraphs with their position indexes and formatting metadata.
+2. The selected paragraphs and a user prompt are sent to Claude via `aiRewrite.js`.
+3. Claude returns rewritten text mapped back to paragraph indexes.
+4. `docxRewriter.js` patches the XML — keeping the original run formatting, replacing only the text — and repackages the file as a new `.docx`.
 
 ## Notes
 
-- `enableOfficeEditing: true` activates Apryse's native DOCX editor mode.
-- The `path` option must point to the copied `public/webviewer/lib` folder.
 - WebViewer runs entirely in-browser — no server-side processing needed.
+- The Apryse WebViewer assets are large (~50 MB) and excluded from git via `.gitignore`. They are regenerated automatically on `npm run dev` or `npm run build`.
+- `docxRewriter.js` is a custom XML-level editor rather than a library like docxtemplater, because the AI edits arbitrary documents with no pre-authored templates.
